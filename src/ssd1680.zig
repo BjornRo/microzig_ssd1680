@@ -1,9 +1,9 @@
 const std = @import("std");
 const mz = @import("microzig");
 const mdf = @import("framework.zig");
-const DigitalIO = mdf.base.Digital_IO;
-const DatagramDevice = mdf.base.Datagram_Device;
-const Pin = mz.hal.gpio.Pin;
+// const DigitalIO_ = mdf.base.Digital_IO;
+// const DatagramDevice_ = @import("base/Datagram_Device.zig");
+// const Pin = mz.hal.gpio.Pin;
 pub const delayus_callback = fn (delay: u32) void;
 
 // copied from https://github.com/mbv/ssd1680
@@ -94,31 +94,159 @@ const Color = enum(u1) {
     White = 1,
 };
 
-pub const SSD1680_Pins_Config = struct {
-    BUSY: DigitalIO,
-    RST: DigitalIO,
-    DC: DigitalIO,
-    CS: DigitalIO,
-    SCL: DigitalIO,
-    SDA: DatagramDevice,
+pub const DriverMode = enum {
+    /// The driver operates in the 3-wire SPI mode, which requires a 9 bit datagram device.
+    spi_3wire,
+
+    /// The driver operates in the 4-wire SPI mode, which requires an 8 bit datagram device
+    /// as well as a command/data digital i/o.
+    spi_4wire,
+
+    /// The driver can be initialized with one of the other options and receives
+    /// the mode with initialization.
+    dynamic,
 };
+
+pub const SSD1680_Options = struct {
+    /// Defines the operation of the SSD1680 driver.
+    mode: DriverMode,
+
+    /// Which datagram device interface should be used.
+    Datagram_Device: type = mdf.base.Datagram_Device,
+
+    /// Which digital i/o interface should be used.
+    Digital_IO: type = mdf.base.Digital_IO,
+};
+
+// pub const SSD1680_Pins_Config = struct {
+//     BUSY: DigitalIO,
+//     RST: DigitalIO,
+//     DC: DigitalIO,
+//     CS: DigitalIO,
+//     SCL: DigitalIO,
+//     SDA: DatagramDevice,
+// };
 
 const RESET_DELAY_MS = std.time.ns_per_ms * 10;
 
-pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, delay_callback: delayus_callback) type {
+pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay_callback: delayus_callback) type {
+    switch (options.mode) {
+        .spi_4wire => {},
+        .spi_3wire, .dynamic => @compileError("3-wire SPI / .dynamic operation is not supported yet!"),
+    }
+
     return struct {
+        const Self = @This();
+
+        const DatagramDevice = options.Datagram_Device;
+        const DigitalIO = switch (options.mode) {
+            // 4-wire SPI mode uses a dedicated command/data control pin:
+            .spi_4wire, .dynamic => options.Digital_IO,
+
+            // The other two modes don't use that, so we use a `void` pin here to save
+            // memory:
+            .spi_3wire => void,
+        };
+
+        pub const DriverInitMode = union(enum) {
+            spi_3wire: noreturn,
+            spi_4wire: struct {
+                device: DatagramDevice,
+                dc_pin: DigitalIO,
+            },
+        };
+
+        const Mode = switch (options.mode) {
+            .dynamic => DriverMode,
+            else => void,
+        };
+
         height: @TypeOf(height) = height,
         width: @TypeOf(width) = width,
-        pins: SSD1680_Pins_Config = pins,
-        internal_delay: *const delay_callback,
+        internal_delay: *const delayus_callback = delay_callback,
 
-        const Self = @This();
+        dd: DatagramDevice,
+        mode: Mode,
+        busy_pin: DigitalIO,
+        rst_pin: DigitalIO,
+        dc_pin: DigitalIO,
+
+        /// Initializes the device and sets up sane defaults.
+        pub const init = switch (options.mode) {
+            .spi_3wire => initWithoutIO,
+            .spi_4wire => initWithIO,
+            .dynamic => initWithMode,
+        };
+
+        /// Creates an instance with only a datagram device.
+        /// `init` will be an alias to this if the init requires no D/C pin.
+        fn initWithoutIO(dev: DatagramDevice, busy_pin: DigitalIO, rst_pin: DigitalIO) !Self {
+            var self = Self{
+                .dd = dev,
+                .busy_pin = busy_pin,
+                .rst_pin = rst_pin,
+                .dc_pin = {},
+                .mode = {},
+            };
+            try busy_pin.set_direction(.input);
+            try rst_pin.set_direction(.output);
+
+            try self.initSequence();
+            return self;
+        }
+
+        /// Creates an instance with a datagram device and the D/C pin.
+        /// `init` will be an alias to this if the init requires a D/C pin.
+        fn initWithIO(dev: DatagramDevice, dc_pin: DigitalIO, busy_pin: DigitalIO, rst_pin: DigitalIO) !Self {
+            var self = Self{
+                .dd = dev,
+                .busy_pin = busy_pin,
+                .rst_pin = rst_pin,
+                .dc_pin = dc_pin,
+                .mode = {},
+            };
+
+            try busy_pin.set_direction(.input);
+            try rst_pin.set_direction(.output);
+            try dc_pin.set_direction(.output);
+
+            try self.initSequence();
+            return self;
+        }
+
+        fn initWithMode(mode: DriverInitMode, busy_pin: DigitalIO, rst_pin: DigitalIO) !Self {
+            var self = Self{
+                .dd = switch (mode) {
+                    .spi_3wire => @compileError("TODO"),
+                    .spi_4wire => |opt| opt.device,
+                },
+                .dc_pin = switch (mode) {
+                    .spi_3wire => @compileError("TODO"),
+                    .spi_4wire => |opt| opt.dc_pin,
+                },
+                .mode = switch (mode) {
+                    .spi_3wire => .spi_3wire,
+                    .spi_4wire => .spi_4wire,
+                },
+                .busy_pin = busy_pin,
+                .rst_pin = rst_pin,
+            };
+
+            if (self.mode == .spi_4wire) {
+                try self.busy_pin.set_direction(.input);
+                try self.rst_pin.set_direction(.output);
+                try self.dc_pin.set_direction(.output);
+            }
+
+            try self.initSequence();
+            return self;
+        }
 
         /// If present, sets the D/C pin to the required mode.
         /// NOTE: This function must be called *before* activating the device
         ///       via chip select, so before calling `(..).connect`!
         fn setDcPin(self: Self, mode: enum { command, data }) !void {
-            try self.pins.DC.write(switch (mode) {
+            try self.dc_pin.write(switch (mode) {
                 .command => .low,
                 .data => .high,
             });
@@ -126,25 +254,37 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
 
         fn control(self: Self, cmd: Command) !void {
             try self.setDcPin(.command);
-            try self.pins.SDA.write(&.{@intFromEnum(cmd)});
+
+            try self.dd.connect();
+            defer self.dd.disconnect();
+
+            try self.dd.write(&.{@intFromEnum(cmd)});
         }
 
         fn command(self: Self, cmd: Command, data: []const u8) !void {
             try self.control(cmd);
             try self.setDcPin(.data);
-            try self.pins.SDA.write(data);
+
+            try self.dd.connect();
+            defer self.dd.disconnect();
+
+            try self.dd.write(data);
         }
 
         fn commandRepeat(self: Self, cmd: Command, value: u8, repeats: u16) !void {
             try self.control(cmd);
             try self.setDcPin(.data);
+
+            try self.dd.connect();
+            defer self.dd.disconnect();
+
             for (0..repeats) |_| {
-                try self.pins.SDA.write(&[_]u8{value});
+                try self.dd.write(&[_]u8{value});
             }
         }
 
         fn waitUntilIdle(self: Self) !void {
-            while (try self.pins.BUSY.read() == .high) {
+            while (try self.busy_pin.read() == .high) {
                 self.internal_delay(std.time.ns_per_ms);
             }
         }
@@ -156,16 +296,16 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
         fn resetHW(self: Self) !void {
             try self.setDcPin(.data);
 
-            try self.pins.RST.write(.high);
+            try self.rst_pin.write(.high);
             self.internal_delay(RESET_DELAY_MS);
 
-            try self.pins.RST.write(.low);
+            try self.rst_pin.write(.low);
             self.internal_delay(RESET_DELAY_MS);
 
-            try self.pins.RST.write(.high);
+            try self.rst_pin.write(.high);
         }
 
-        pub fn init(self: Self) !void {
+        fn initSequence(self: Self) !void {
             try self.resetHW();
             try self.control(.SW_RESET);
             try self.waitUntilIdle();
