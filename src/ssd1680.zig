@@ -197,13 +197,13 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
 
         pub fn clearBwFrame(self: Self) !void {
             try self.useFullAddressRange();
-            try self.cmd(.WRITE_BW_DATA);
+            try self.control(.WRITE_BW_DATA);
             try self.commandRepeat(@intFromEnum(Color.White), (self.width / 8) * self.height);
         }
 
         pub fn clearRedFrame(self: Self) !void {
             try self.useFullAddressRange();
-            try self.cmd(.WRITE_RED_DATA);
+            try self.control(.WRITE_RED_DATA);
             try self.commandRepeat(@intFromEnum(Color.Black), (self.width / 8) * self.height);
         }
 
