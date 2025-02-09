@@ -1,0 +1,19 @@
+.{
+    .name = "microzig_ssd1680",
+
+    .version = "0.0.0",
+    .dependencies = .{
+        .microzig = .{
+            .url = "git+https://github.com/ZigEmbeddedGroup/microzig#a413e29de06010330abb0a9860467fc04dec2dbb",
+            .hash = "1220126b71f36848be577499329c4ef48182873f70bf6ea1116002eccad2f77966f9",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        // For example...
+        //"LICENSE",
+        //"README.md",
+    },
+}
