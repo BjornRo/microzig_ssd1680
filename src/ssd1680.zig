@@ -10,7 +10,6 @@ pub const delayus_callback = fn (delay: u32) void;
 // and https://github.com/marko-pi/parallel/blob/main/SSD1680.py
 
 const Command = enum(u4) {
-    // Init
     SW_RESET = 0x12,
     DRIVER_OUTPUT_CONTROL = 0x01,
     DATA_ENTRY_MODE = 0x11,
@@ -20,7 +19,6 @@ const Command = enum(u4) {
     SET_RAMX_RANGE = 0x44,
     SET_RAMY_RANGE = 0x45,
 
-    // Update
     SET_RAMX_ADDRESS = 0x4E,
     SET_RAMY_ADDRESS = 0x4F,
     WRITE_BW_DATA = 0x24,
@@ -32,11 +30,6 @@ const Command = enum(u4) {
 const TempSensor = enum(u1) {
     External = 0x48,
     Internal = 0x80,
-};
-
-const Flag = enum(u3) {
-    DATA_ENTRY_INCRY_INCRX = 0x3,
-    DISPLAY_MODE_1 = 0xF7,
 };
 
 // const BorderWaveFormControl = union {
@@ -63,6 +56,10 @@ const Flag = enum(u3) {
 //         HiZ = 0b11 << 6,
 //     };
 // };
+
+fn u16To2u8(value: u16) [2]u8 {
+    return .{ @truncate(value & 0xFF), @truncate(value >> 8) };
+}
 
 fn borderWaveFormControl(
     VBD_transition: enum(u8) { // Vertical blanking display
@@ -110,8 +107,8 @@ const RESET_DELAY_MS = std.time.ns_per_ms * 10;
 
 pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, delay_callback: delayus_callback) type {
     return struct {
-        height: @TypeOf(height) = height - 1,
-        width: @TypeOf(width) = width - 1,
+        height: @TypeOf(height) = height,
+        width: @TypeOf(width) = width,
         pins: SSD1680_Pins_Config = pins,
         internal_delay: *const delay_callback,
 
@@ -127,28 +124,20 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
             });
         }
 
-        fn executeCommand(self: Self, cmd: Command) !void {
+        fn control(self: Self, cmd: Command) !void {
             try self.setDcPin(.command);
-
-            try self.pins.SDA.connect();
-            defer self.pins.SDA.disconnect();
-
             try self.pins.SDA.write(&.{@intFromEnum(cmd)});
         }
 
         fn command(self: Self, cmd: Command, data: []const u8) !void {
-            try self.pins.DC.write(.low);
-            try self.pins.SDA.write(&.{@intFromEnum(cmd)});
-            try self.sendData(data);
-        }
-
-        fn sendData(self: Self, data: []const u8) !void {
-            try self.pins.DC.write(.high);
+            try self.control(cmd);
+            try self.setDcPin(.data);
             try self.pins.SDA.write(data);
         }
 
-        fn sendNdata(self: Self, value: u8, repeats: u32) !void {
-            try self.pins.DC.write(.high);
+        fn commandRepeat(self: Self, cmd: Command, value: u8, repeats: u16) !void {
+            try self.control(cmd);
+            try self.setDcPin(.data);
             for (0..repeats) |_| {
                 try self.pins.SDA.write(&[_]u8{value});
             }
@@ -161,7 +150,7 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
         }
 
         fn useFullAddressRange(self: Self) !void {
-            try self.setRamArea(0, self.width, 0, self.height);
+            try self.setRamArea(0, self.width - 1, 0, self.height - 1);
         }
 
         fn resetHW(self: Self) !void {
@@ -176,31 +165,27 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
             try self.pins.RST.write(.high);
         }
 
-        fn resetSW(self: Self) !void {
-            try self.setDcPin(.command);
-            try self.pins.SDA.write(&.{@intFromEnum(Command.SW_RESET)});
-        }
-
-        fn u16To2u8(value: u16) [2]u8 {
-            return .{ @truncate(value & 0xFF), @truncate(value >> 8) };
-        }
-
         pub fn init(self: Self) !void {
             try self.resetHW();
-            try self.resetSW();
+            try self.control(.SW_RESET);
             try self.waitUntilIdle();
 
-            const left, const right = u16To2u8(self.height);
+            const left, const right = u16To2u8(self.height - 1);
             try self.command(.DRIVER_OUTPUT_CONTROL, &[]u8{ left, right, 0 });
             try self.command(.BORDER_WAVEFORM_CONTROL, &[]u8{borderWaveFormControl(.LUT1, .FOLLOW_LUT, .VSS, .GS_TRANSITION)});
-            try self.command(.DISPLAY_UPDATE_CONTROL, &[_]u8{ 0x00, 0x80 });
-            try self.command(.TEMP_SENSOR, &[_]u8{@intFromEnum(TempSensor.Internal)});
+            try self.command(.DISPLAY_UPDATE_CONTROL, &[]u8{ 0x00, 0x80 });
+            try self.command(.TEMP_SENSOR, &[]u8{@intFromEnum(TempSensor.Internal)});
 
-            try self.command(.DATA_ENTRY_MODE, &[]u8{@intFromEnum(Flag.DATA_ENTRY_INCRY_INCRX)});
+            try self.command(.DATA_ENTRY_MODE, &[]u8{0x3});
             try self.useFullAddressRange(); // 0x44, 0x45
             try self.setRamAddress(0, 0);
 
             try self.waitUntilIdle();
+        }
+
+        pub fn setRamAddress(self: Self, x: u16, y: u16) !void {
+            try self.command(.SET_RAMX_ADDRESS, &[]u8{@truncate(x >> 3)});
+            try self.command(.SET_RAMY_ADDRESS, &u16To2u8(y));
         }
 
         pub fn setRamArea(self: Self, start_x: u16, end_x: u16, start_y: u16, end_y: u16) !void {
@@ -213,34 +198,29 @@ pub fn SSD1680(comptime pins: SSD1680_Pins_Config, height: u16, width: u16, dela
         pub fn clearBwFrame(self: Self) !void {
             try self.useFullAddressRange();
             try self.cmd(.WRITE_BW_DATA);
-            try self.sendNdata(@intFromEnum(Color.White), self.width / (self.height * 8));
+            try self.commandRepeat(@intFromEnum(Color.White), (self.width / 8) * self.height);
         }
 
         pub fn clearRedFrame(self: Self) !void {
             try self.useFullAddressRange();
             try self.cmd(.WRITE_RED_DATA);
-            try self.sendNdata(@intFromEnum(Color.Black), self.width / (self.height * 8));
+            try self.commandRepeat(@intFromEnum(Color.Black), (self.width / 8) * self.height);
         }
 
         pub fn updateBwFrame(self: Self, data: []const u8) !void {
             try self.useFullAddressRange();
-            try self.cmdSendData(.WRITE_BW_DATA, data);
+            try self.command(.WRITE_BW_DATA, data);
         }
 
         pub fn updateRedFrame(self: Self, data: []const u8) !void {
             try self.useFullAddressRange();
-            try self.cmdSendData(.WRITE_RED_DATA, data);
+            try self.command(.WRITE_RED_DATA, data);
         }
 
-        pub fn displayFrame(self: Self) !void {
-            try self.cmdSendData(.UPDATE_DISPLAY_CTRL2, &[]u8{@intFromEnum(Flag.DISPLAY_MODE_1)});
-            try self.cmd(.MASTER_ACTIVATE);
+        pub fn display(self: Self) !void {
+            try self.command(.UPDATE_DISPLAY_CTRL2, &[]u8{0xF7});
+            try self.control(.MASTER_ACTIVATE);
             try self.waitUntilIdle();
-        }
-
-        pub fn setRamAddress(self: Self, x: u16, y: u16) !void {
-            try self.command(.SET_RAMX_ADDRESS, &[]u8{@truncate(x >> 3)});
-            try self.command(.SET_RAMY_ADDRESS, &u16To2u8(y));
         }
     };
 }
