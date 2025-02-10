@@ -93,7 +93,7 @@ pub const SSD1680_Options = struct {
 
 const RESET_DELAY_MS = std.time.ns_per_ms * 10;
 
-pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay_callback: delayus_callback) type {
+pub fn SSD1680(comptime options: SSD1680_Options, width: u16, height: u16, delay_callback: delayus_callback) type {
     switch (options.mode) {
         .spi_4wire => {},
         .spi_3wire, .dynamic => @compileError("3-wire SPI / .dynamic operation is not supported yet!"),
