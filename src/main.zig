@@ -59,7 +59,7 @@ pub fn main() !void {
     utils.message_monospace(&dispbuffer, "Hello world\n:)", .Center, 0, 296, 128);
     try ssd1680.writeColorFullscreen(.White, dispbuffer);
 
-    delay_us(std.time.ns_per_s * 5);
+    delay_us(std.time.us_per_s * 5);
     utils.message_monospace(&dispbuffer, "\nGoodbye world\n", .Left, 0, 296, 128);
     try ssd1680.writeColorFullscreen(.White, dispbuffer);
 }
