@@ -5,6 +5,7 @@ const mz = @import("microzig");
 // const mdf = @import("../framework.zig");
 // const DigitalIO = mdf.base.Digital_IO;
 const SSD1680 = @import("ssd1680.zig").SSD1680;
+const utils = @import("utils.zig");
 const rp2040 = mz.hal;
 // const spi = rp2040.spi;
 const SPIDevice = rp2040.drivers.SPI_Device;
@@ -24,6 +25,10 @@ pub fn delay_us(time_delay: u32) void {
 // CS (Chip Select): GPIO 17
 
 pub fn main() !void {
+    var buffer: [2048]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const allocator = fba.allocator();
+
     var busy_pin = GPIODevice.init(gpio.num(0));
     var rst_pin = GPIODevice.init(gpio.num(1));
     var dc_pin = GPIODevice.init(gpio.num(2));
@@ -41,11 +46,16 @@ pub fn main() !void {
 
     var spi_device = SPIDevice.init(spi0, cs_pin, .{});
 
-    const ssd1680 = SSD1680(.{ .mode = .spi_4wire }, 296, 128, delay_us);
-    _ = try ssd1680.init(
+    const ssd1680 = try SSD1680(.{ .mode = .spi_4wire }, 296, 128, delay_us).init(
         spi_device.datagram_device(),
         dc_pin.digital_io(),
         busy_pin.digital_io(),
         rst_pin.digital_io(),
     );
+
+    var dispbuffer = try allocator.alloc(u8, ssd1680.calcBuffer());
+    defer allocator.free(dispbuffer);
+
+    utils.message_monospace(&dispbuffer, "Hello world\n:)", .Center, 0, 128, 296);
+    try ssd1680.writeColorFullscreen(.White, dispbuffer);
 }

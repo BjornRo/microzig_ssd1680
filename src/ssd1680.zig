@@ -14,6 +14,7 @@ pub const delayus_callback = fn (delay: u32) void;
 const Command = enum(u8) {
     SW_RESET = 0x12,
     DRIVER_OUTPUT_CONTROL = 0x01,
+    DEEP_SLEEP = 0x10,
     DATA_ENTRY_MODE = 0x11,
     TEMP_SENSOR = 0x18,
     BORDER_WAVEFORM_CONTROL = 0x3C,
@@ -216,6 +217,7 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         }
 
         fn control(self: Self, cmd: Command) !void {
+            try self.waitUntilIdle();
             try self.setDcPin(.command);
 
             try self.dd.connect();
@@ -225,6 +227,7 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         }
 
         fn command(self: Self, cmd: Command, data: []const u8) !void {
+            try self.waitUntilIdle();
             try self.control(cmd);
             try self.setDcPin(.data);
 
@@ -232,6 +235,10 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
             defer self.dd.disconnect();
 
             try self.dd.write(data);
+        }
+
+        fn commandScalar(self: Self, cmd: Command, data: u8) !void {
+            try self.command(cmd, &[_]u8{data});
         }
 
         fn commandRepeat(self: Self, cmd: Command, value: u8, repeats: u16) !void {
@@ -271,23 +278,29 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         fn initSequence(self: Self) !void {
             try self.resetHW();
             try self.control(.SW_RESET);
-            try self.waitUntilIdle();
 
             const left, const right = u16To2u8(self.height - 1);
             try self.command(.DRIVER_OUTPUT_CONTROL, &[_]u8{ left, right, 0 });
-            try self.command(.BORDER_WAVEFORM_CONTROL, &[_]u8{borderWaveFormControl(.LUT1, .FOLLOW_LUT, .VSS, .GS_TRANSITION)});
+            try self.commandScalar(
+                .BORDER_WAVEFORM_CONTROL,
+                borderWaveFormControl(.LUT1, .FOLLOW_LUT, .VSS, .GS_TRANSITION),
+            );
             try self.command(.DISPLAY_UPDATE_CONTROL, &[_]u8{ 0x00, 0x80 });
-            try self.command(.TEMP_SENSOR, &[_]u8{@intFromEnum(TempSensor.Internal)});
+            try self.commandScalar(.TEMP_SENSOR, @intFromEnum(TempSensor.Internal));
 
-            try self.command(.DATA_ENTRY_MODE, &[_]u8{0x3});
+            try self.commandScalar(.DATA_ENTRY_MODE, 0x3);
             try self.useFullAddressRange(); // 0x44, 0x45
             try self.setRamAddress(0, 0);
 
             try self.waitUntilIdle();
         }
 
+        pub fn calcBuffer(self: Self) u16 {
+            return (self.width / 8) * self.height;
+        }
+
         pub fn setRamAddress(self: Self, x: u16, y: u16) !void {
-            try self.command(.SET_RAMX_ADDRESS, &[_]u8{@truncate(x >> 3)});
+            try self.commandScalar(.SET_RAMX_ADDRESS, @truncate(x >> 3));
             try self.command(.SET_RAMY_ADDRESS, &u16To2u8(y));
         }
 
@@ -309,7 +322,7 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
             else
                 .{ .cmd = .WRITE_WHITE_DATA, .color = .White };
             try self.control(opt.cmd);
-            try self.commandRepeat(@intFromEnum(opt.color), (self.width / 8) * self.height);
+            try self.commandRepeat(@intFromEnum(opt.color), self.calcBuffer());
         }
 
         pub fn writeColorFullscreen(self: Self, color: enum { Red, White }, data: []const u8) !void {
@@ -318,29 +331,41 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         }
 
         pub fn display(self: Self) !void {
-            try self.command(.UPDATE_DISPLAY_CTRL2, &[_]u8{0xF7});
+            // Display Update Sequence:
+            // 0b10000000 enable clock
+            // 0b01000000 enable analog
+            // 0b00100000 load temperature value
+            // 0b00010000 load default LUT
+            // 0b00001000 display mode 1 or 2
+            // 0b00000100 display
+            // 0b00000010 disable analog
+            // 0b00000001 disable clock
+            try self.commandScalar(.UPDATE_DISPLAY_CTRL2, 0xF7);
             try self.control(.MASTER_ACTIVATE);
-            try self.waitUntilIdle();
         }
 
-        // pub fn partialRefresh(self: Self) !void {
-        //     // zig fmt: off
-        //     const LUT_partial: []const u8 = &.{
-        //         0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        //         0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x00, 0x00, 0x00 };
-        //     // zig fmt: on
-        // }
+        /// Wake up device using resetHW
+        pub fn deepSleep(self: Self, mode: enum(u8) { Normal = 0b0, Mode1 = 0b01, Mode2 = 0b11 }) !void {
+            try self.commandScalar(.DEEP_SLEEP, @intFromEnum(mode));
+        }
     };
 }
 
+// pub fn partialRefresh(self: Self) !void {
+//     // zig fmt: off
+//     const LUT_partial: []const u8 = &.{
+//         0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+//         0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x00, 0x00, 0x00 };
+//     // zig fmt: on
+// }
 // pub const SSD1680_Pins_Config = struct {
 //     BUSY: DigitalIO,
 //     RST: DigitalIO,
