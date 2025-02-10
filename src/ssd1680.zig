@@ -299,9 +299,14 @@ pub fn SSD1680(comptime options: SSD1680_Options, width: u16, height: u16, delay
             return (self.width / 8) * self.height;
         }
 
-        pub fn setRamAddress(self: Self, x: u16, y: u16) !void {
-            try self.commandScalar(.SET_RAMX_ADDRESS, @truncate(x >> 3));
-            try self.command(.SET_RAMY_ADDRESS, &u16To2u8(y));
+        pub fn writeRow(self: Self, row: u16, color: enum { Red, White }, data: []const u8) !void {
+            try self.setRamAddress(row << 3, 0);
+            try self.command(if (color == .Red) .WRITE_RED_DATA else .WRITE_WHITE_DATA, data);
+        }
+
+        pub fn setRamAddress(self: Self, row: u16, col: u16) !void {
+            try self.commandScalar(.SET_RAMX_ADDRESS, @truncate(row >> 3));
+            try self.command(.SET_RAMY_ADDRESS, &u16To2u8(col));
         }
 
         pub fn setRamArea(self: Self, start_x: u16, end_x: u16, start_y: u16, end_y: u16) !void {
@@ -321,8 +326,7 @@ pub fn SSD1680(comptime options: SSD1680_Options, width: u16, height: u16, delay
                 .{ .cmd = .WRITE_RED_DATA, .color = .Black }
             else
                 .{ .cmd = .WRITE_WHITE_DATA, .color = .White };
-            try self.control(opt.cmd);
-            try self.commandRepeat(@intFromEnum(opt.color), self.calcBuffer());
+            try self.commandRepeat(opt.cmd, @intFromEnum(opt.color), self.calcBuffer());
         }
 
         pub fn writeColorFullscreen(self: Self, color: enum { Red, White }, data: []const u8) !void {

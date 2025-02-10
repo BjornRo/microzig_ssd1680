@@ -25,9 +25,9 @@ pub fn delay_us(time_delay: u32) void {
 // CS (Chip Select): GPIO 17
 
 pub fn main() !void {
-    var buffer: [2048]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = fba.allocator();
+    // var buffer: [2048]u8 = undefined;
+    // var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    // const allocator = fba.allocator();
 
     var busy_pin = GPIODevice.init(gpio.num(0));
     var rst_pin = GPIODevice.init(gpio.num(1));
@@ -53,15 +53,17 @@ pub fn main() !void {
         rst_pin.digital_io(),
     );
 
-    var dispbuffer = try allocator.alloc(u8, ssd1680.calcBuffer());
-    defer allocator.free(dispbuffer);
+    // var dispbuffer = try allocator.alloc(u8, ssd1680.calcBuffer());
+    // defer allocator.free(dispbuffer);
 
-    while (true) {
-        utils.message_monospace(&dispbuffer, "Hello world\n:)", .Center, 0, 296, 128);
-        try ssd1680.writeColorFullscreen(.White, dispbuffer);
+    try ssd1680.clearColorBuffer(.White);
 
-        delay_us(std.time.us_per_s * 5);
-        utils.message_monospace(&dispbuffer, "\nGoodbye world\n", .Left, 0, 296, 128);
-        try ssd1680.writeColorFullscreen(.White, dispbuffer);
-    }
+    // while (true) {
+    //     utils.message_monospace(&dispbuffer, "Hello world\n:)", .Center, 0, 296, 128);
+    //     try ssd1680.writeColorFullscreen(.White, dispbuffer);
+
+    //     delay_us(std.time.us_per_s * 5);
+    //     utils.message_monospace(&dispbuffer, "\nGoodbye world\n", .Left, 0, 296, 128);
+    //     try ssd1680.writeColorFullscreen(.White, dispbuffer);
+    // }
 }
