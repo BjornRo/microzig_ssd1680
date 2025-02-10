@@ -1,6 +1,8 @@
 const std = @import("std");
 const mz = @import("microzig");
-const mdf = @import("framework.zig");
+// const mdf = @import("framework.zig");
+const mdf = mz.drivers;
+// const mdf = @import("../framework.zig");
 // const DigitalIO_ = mdf.base.Digital_IO;
 // const DatagramDevice_ = @import("base/Datagram_Device.zig");
 // const Pin = mz.hal.gpio.Pin;
@@ -9,7 +11,7 @@ pub const delayus_callback = fn (delay: u32) void;
 // copied from https://github.com/mbv/ssd1680
 // and https://github.com/marko-pi/parallel/blob/main/SSD1680.py
 
-const Command = enum(u4) {
+const Command = enum(u8) {
     SW_RESET = 0x12,
     DRIVER_OUTPUT_CONTROL = 0x01,
     DATA_ENTRY_MODE = 0x11,
@@ -27,7 +29,7 @@ const Command = enum(u4) {
     MASTER_ACTIVATE = 0x20,
 };
 
-const TempSensor = enum(u1) {
+const TempSensor = enum(u8) {
     External = 0x48,
     Internal = 0x80,
 };
@@ -311,12 +313,12 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
             try self.waitUntilIdle();
 
             const left, const right = u16To2u8(self.height - 1);
-            try self.command(.DRIVER_OUTPUT_CONTROL, &[]u8{ left, right, 0 });
-            try self.command(.BORDER_WAVEFORM_CONTROL, &[]u8{borderWaveFormControl(.LUT1, .FOLLOW_LUT, .VSS, .GS_TRANSITION)});
-            try self.command(.DISPLAY_UPDATE_CONTROL, &[]u8{ 0x00, 0x80 });
-            try self.command(.TEMP_SENSOR, &[]u8{@intFromEnum(TempSensor.Internal)});
+            try self.command(.DRIVER_OUTPUT_CONTROL, &[_]u8{ left, right, 0 });
+            try self.command(.BORDER_WAVEFORM_CONTROL, &[_]u8{borderWaveFormControl(.LUT1, .FOLLOW_LUT, .VSS, .GS_TRANSITION)});
+            try self.command(.DISPLAY_UPDATE_CONTROL, &[_]u8{ 0x00, 0x80 });
+            try self.command(.TEMP_SENSOR, &[_]u8{@intFromEnum(TempSensor.Internal)});
 
-            try self.command(.DATA_ENTRY_MODE, &[]u8{0x3});
+            try self.command(.DATA_ENTRY_MODE, &[_]u8{0x3});
             try self.useFullAddressRange(); // 0x44, 0x45
             try self.setRamAddress(0, 0);
 
@@ -324,15 +326,15 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         }
 
         pub fn setRamAddress(self: Self, x: u16, y: u16) !void {
-            try self.command(.SET_RAMX_ADDRESS, &[]u8{@truncate(x >> 3)});
+            try self.command(.SET_RAMX_ADDRESS, &[_]u8{@truncate(x >> 3)});
             try self.command(.SET_RAMY_ADDRESS, &u16To2u8(y));
         }
 
         pub fn setRamArea(self: Self, start_x: u16, end_x: u16, start_y: u16, end_y: u16) !void {
-            try self.command(.SET_RAMX_RANGE, &[]u8{ @truncate(start_x >> 3), @truncate(end_x >> 3) });
+            try self.command(.SET_RAMX_RANGE, &[_]u8{ @truncate(start_x >> 3), @truncate(end_x >> 3) });
             const start = u16To2u8(start_y);
             const end = u16To2u8(end_y);
-            try self.command(.SET_RAMY_RANGE, &[]u8{ start[0], start[1], end[0], end[1] });
+            try self.command(.SET_RAMY_RANGE, &[_]u8{ start[0], start[1], end[0], end[1] });
         }
 
         pub fn clearBwFrame(self: Self) !void {
@@ -358,7 +360,7 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         }
 
         pub fn display(self: Self) !void {
-            try self.command(.UPDATE_DISPLAY_CTRL2, &[]u8{0xF7});
+            try self.command(.UPDATE_DISPLAY_CTRL2, &[_]u8{0xF7});
             try self.control(.MASTER_ACTIVATE);
             try self.waitUntilIdle();
         }
