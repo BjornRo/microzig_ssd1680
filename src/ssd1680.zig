@@ -23,7 +23,7 @@ const Command = enum(u8) {
 
     SET_RAMX_ADDRESS = 0x4E,
     SET_RAMY_ADDRESS = 0x4F,
-    WRITE_BW_DATA = 0x24,
+    WRITE_WHITE_DATA = 0x24,
     WRITE_RED_DATA = 0x26,
     UPDATE_DISPLAY_CTRL2 = 0x22,
     MASTER_ACTIVATE = 0x20,
@@ -33,31 +33,6 @@ const TempSensor = enum(u8) {
     External = 0x48,
     Internal = 0x80,
 };
-
-// const BorderWaveFormControl = union {
-//     const VBDTransitionSetting = enum(u8) { // Vertical blanking display
-//         LUT0 = 0b00,
-//         LUT1 = 0b01,
-//         LUT2 = 0b10,
-//         LUT3 = 0b11,
-//     };
-//     const GSTransitionControl = enum(u8) { // Gate Start
-//         FOLLOW_LUT_VCOM = 0,
-//         FOLLOW_LUT = 1 << 2,
-//     };
-//     const VBDLevel = enum(u8) {
-//         VSS = 0b00 << 4,
-//         VSH1 = 0b01 << 4,
-//         VSL = 0b10 << 4,
-//         VSH2 = 0b11 << 4,
-//     };
-//     const VBDOption = enum(u8) {
-//         GS_TRANSITION = 0b00 << 6,
-//         FIX_LEVEL = 0b01 << 6,
-//         VCOM = 0b10 << 6,
-//         HiZ = 0b11 << 6,
-//     };
-// };
 
 fn u16To2u8(value: u16) [2]u8 {
     return .{ @truncate(value & 0xFF), @truncate(value >> 8) };
@@ -91,11 +66,6 @@ fn borderWaveFormControl(
         (@intFromEnum(GS_transition_control) << 2) | @intFromEnum(VBD_transition);
 }
 
-const Color = enum(u1) {
-    Black = 0,
-    White = 1,
-};
-
 pub const DriverMode = enum {
     /// The driver operates in the 3-wire SPI mode, which requires a 9 bit datagram device.
     spi_3wire,
@@ -119,15 +89,6 @@ pub const SSD1680_Options = struct {
     /// Which digital i/o interface should be used.
     Digital_IO: type = mdf.base.Digital_IO,
 };
-
-// pub const SSD1680_Pins_Config = struct {
-//     BUSY: DigitalIO,
-//     RST: DigitalIO,
-//     DC: DigitalIO,
-//     CS: DigitalIO,
-//     SCL: DigitalIO,
-//     SDA: DatagramDevice,
-// };
 
 const RESET_DELAY_MS = std.time.ns_per_ms * 10;
 
@@ -337,26 +298,23 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
             try self.command(.SET_RAMY_RANGE, &[_]u8{ start[0], start[1], end[0], end[1] });
         }
 
-        pub fn clearBwFrame(self: Self) !void {
+        pub fn clearColorBuffer(self: Self, color: enum { Red, White }) !void {
+            const ScreenColor = enum(u1) {
+                Black = 0,
+                White = 1,
+            };
             try self.useFullAddressRange();
-            try self.control(.WRITE_BW_DATA);
-            try self.commandRepeat(@intFromEnum(Color.White), (self.width / 8) * self.height);
+            const opt: struct { cmd: Command, color: ScreenColor } = if (color == .Red)
+                .{ .cmd = .WRITE_RED_DATA, .color = .Black }
+            else
+                .{ .cmd = .WRITE_WHITE_DATA, .color = .White };
+            try self.control(opt.cmd);
+            try self.commandRepeat(@intFromEnum(opt.color), (self.width / 8) * self.height);
         }
 
-        pub fn clearRedFrame(self: Self) !void {
+        pub fn writeColorFullscreen(self: Self, color: enum { Red, White }, data: []const u8) !void {
             try self.useFullAddressRange();
-            try self.control(.WRITE_RED_DATA);
-            try self.commandRepeat(@intFromEnum(Color.Black), (self.width / 8) * self.height);
-        }
-
-        pub fn updateBwFrame(self: Self, data: []const u8) !void {
-            try self.useFullAddressRange();
-            try self.command(.WRITE_BW_DATA, data);
-        }
-
-        pub fn updateRedFrame(self: Self, data: []const u8) !void {
-            try self.useFullAddressRange();
-            try self.command(.WRITE_RED_DATA, data);
+            try self.command(if (color == .Red) .WRITE_RED_DATA else .WRITE_WHITE_DATA, data);
         }
 
         pub fn display(self: Self) !void {
@@ -366,3 +324,37 @@ pub fn SSD1680(comptime options: SSD1680_Options, height: u16, width: u16, delay
         }
     };
 }
+
+// pub const SSD1680_Pins_Config = struct {
+//     BUSY: DigitalIO,
+//     RST: DigitalIO,
+//     DC: DigitalIO,
+//     CS: DigitalIO,
+//     SCL: DigitalIO,
+//     SDA: DatagramDevice,
+// };
+
+// const BorderWaveFormControl = union {
+//     const VBDTransitionSetting = enum(u8) { // Vertical blanking display
+//         LUT0 = 0b00,
+//         LUT1 = 0b01,
+//         LUT2 = 0b10,
+//         LUT3 = 0b11,
+//     };
+//     const GSTransitionControl = enum(u8) { // Gate Start
+//         FOLLOW_LUT_VCOM = 0,
+//         FOLLOW_LUT = 1 << 2,
+//     };
+//     const VBDLevel = enum(u8) {
+//         VSS = 0b00 << 4,
+//         VSH1 = 0b01 << 4,
+//         VSL = 0b10 << 4,
+//         VSH2 = 0b11 << 4,
+//     };
+//     const VBDOption = enum(u8) {
+//         GS_TRANSITION = 0b00 << 6,
+//         FIX_LEVEL = 0b01 << 6,
+//         VCOM = 0b10 << 6,
+//         HiZ = 0b11 << 6,
+//     };
+// };
